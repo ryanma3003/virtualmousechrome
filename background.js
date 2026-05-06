@@ -2,15 +2,9 @@ const SETTINGS_KEY = "settings";
 const ALARM_NAME = "jiggle-alarm";
 const DEFAULT_SETTINGS = {
   enabled: false,
-  intervalMs: 30_000,
-  showIndicator: true
+  intervalMs: 30_000
 };
-const MIN_INTERVAL_MS = 3_000;
-const MAX_INTERVAL_MS = 300_000;
 const MIN_ALARM_INTERVAL_MS = 30_000;
-const USER_ACTIVITY_PAUSE_MS = 30_000;
-
-let pauseUntil = 0;
 
 async function getSettings() {
   const stored = await chrome.storage.local.get(SETTINGS_KEY);
@@ -23,15 +17,7 @@ async function saveSettings(nextSettings) {
 }
 
 function clampInterval(intervalMs) {
-  return Math.max(MIN_INTERVAL_MS, Math.min(MAX_INTERVAL_MS, Number(intervalMs) || DEFAULT_SETTINGS.intervalMs));
-}
-
-function normalizeSettings(settings) {
-  return {
-    enabled: Boolean(settings.enabled),
-    intervalMs: clampInterval(settings.intervalMs),
-    showIndicator: settings.showIndicator !== false
-  };
+  return Math.max(5_000, Math.min(300_000, Number(intervalMs) || DEFAULT_SETTINGS.intervalMs));
 }
 
 async function syncKeepAwake(enabled) {
@@ -66,7 +52,6 @@ async function schedule(settings) {
   await chrome.alarms.clear(ALARM_NAME);
 
   if (!settings.enabled) {
-    pauseUntil = 0;
     await syncKeepAwake(false);
     await broadcast({ type: "stop" });
     return;
@@ -74,40 +59,42 @@ async function schedule(settings) {
 
   await syncKeepAwake(true);
 
-  const nextAt = Date.now() + settings.intervalMs;
   if (settings.intervalMs >= MIN_ALARM_INTERVAL_MS) {
-    // One-shot alarms let the worker reschedule around recent user activity
-    // without running any persistent timers.
-    await chrome.alarms.create(ALARM_NAME, { when: Math.max(nextAt, pauseUntil) });
+    await chrome.alarms.create(ALARM_NAME, {
+      periodInMinutes: settings.intervalMs / 60_000
+    });
   }
 
   await broadcast({
     type: "settings-updated",
     enabled: true,
-    intervalMs: settings.intervalMs,
-    showIndicator: settings.showIndicator
+    intervalMs: settings.intervalMs
   });
 }
 
 async function applySettings(partialSettings = {}) {
   const current = await getSettings();
-  const next = normalizeSettings({
+  const next = {
     ...current,
     ...partialSettings
-  });
+  };
+  next.intervalMs = clampInterval(next.intervalMs);
   await saveSettings(next);
   await schedule(next);
   return next;
 }
 
 chrome.runtime.onInstalled.addListener(async () => {
-  const settings = normalizeSettings(await getSettings());
-  await saveSettings(settings);
-  await schedule(settings);
+  const settings = await getSettings();
+  await saveSettings({
+    enabled: Boolean(settings.enabled),
+    intervalMs: clampInterval(settings.intervalMs)
+  });
+  await schedule(await getSettings());
 });
 
 chrome.runtime.onStartup.addListener(async () => {
-  await schedule(normalizeSettings(await getSettings()));
+  await schedule(await getSettings());
 });
 
 chrome.alarms.onAlarm.addListener(async (alarm) => {
@@ -115,13 +102,8 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
     return;
   }
 
-  const settings = normalizeSettings(await getSettings());
+  const settings = await getSettings();
   if (!settings.enabled) {
-    return;
-  }
-
-  if (Date.now() < pauseUntil) {
-    await chrome.alarms.create(ALARM_NAME, { when: pauseUntil });
     return;
   }
 
@@ -131,33 +113,20 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
   });
 
   if (!activeTab?.id) {
-    await chrome.alarms.create(ALARM_NAME, { when: Date.now() + settings.intervalMs });
     return;
   }
 
   try {
-    const response = await chrome.tabs.sendMessage(activeTab.id, {
-      type: "jiggle",
-      showIndicator: settings.showIndicator
-    });
-
-    if (response?.deferredUntil) {
-      pauseUntil = Math.max(pauseUntil, response.deferredUntil);
-    }
+    await chrome.tabs.sendMessage(activeTab.id, { type: "jiggle" });
   } catch {
     // Ignore pages where content scripts are unavailable.
-  }
-
-  if (settings.enabled) {
-    const nextAt = Math.max(Date.now() + settings.intervalMs, pauseUntil);
-    await chrome.alarms.create(ALARM_NAME, { when: nextAt });
   }
 });
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   void (async () => {
     if (message?.type === "get-settings") {
-      sendResponse(normalizeSettings(await getSettings()));
+      sendResponse(await getSettings());
       return;
     }
 
@@ -169,20 +138,6 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     if (message?.type === "set-interval") {
       sendResponse(await applySettings({ intervalMs: message.intervalMs }));
       return;
-    }
-
-    if (message?.type === "set-show-indicator") {
-      sendResponse(await applySettings({ showIndicator: Boolean(message.showIndicator) }));
-      return;
-    }
-
-    if (message?.type === "user-activity") {
-      pauseUntil = Date.now() + USER_ACTIVITY_PAUSE_MS;
-      const settings = normalizeSettings(await getSettings());
-      if (settings.enabled && settings.intervalMs >= MIN_ALARM_INTERVAL_MS) {
-        await chrome.alarms.create(ALARM_NAME, { when: pauseUntil });
-      }
-      sendResponse({ ok: true, pauseUntil });
     }
   })();
 
