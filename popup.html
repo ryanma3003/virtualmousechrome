@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Virtual Mouse Jiggler</title>
+    <link rel="stylesheet" href="popup.css">
+  </head>
+  <body>
+    <main class="popup">
+      <div class="header">
+        <h1>Virtual Mouse Jiggler</h1>
+        <span id="statusBadge" class="status stopped">Stopped</span>
+      </div>
+
+      <label class="field" for="interval">
+        <span>Interval</span>
+        <select id="interval">
+          <option value="3000">3 seconds</option>
+          <option value="5000">5 seconds</option>
+          <option value="10000">10 seconds</option>
+          <option value="15000">15 seconds</option>
+          <option value="30000">30 seconds</option>
+          <option value="60000">1 minute</option>
+          <option value="120000">2 minutes</option>
+          <option value="300000">5 minutes</option>
+        </select>
+      </label>
+
+      <p class="hint">
+        Intervals below 30 seconds use a sparse in-page timer. 30 seconds and above use the extension alarm scheduler.
+      </p>
+
+      <label class="checkbox-field" for="showIndicator">
+        <input id="showIndicator" type="checkbox">
+        <span>Show motion indicator</span>
+      </label>
+
+      <button id="toggleButton" class="toggle-button" type="button">Start</button>
+    </main>
+
+    <script src="popup.js"></script>
+  </body>
+</html>
