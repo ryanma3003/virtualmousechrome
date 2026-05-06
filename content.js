@@ -34,6 +34,18 @@ function shouldPauseForUserActivity() {
   return Date.now() - lastUserActivityAt < USER_ACTIVITY_PAUSE_MS;
 }
 
+function getSafePointer() {
+  const fallbackX = Math.max(0, Math.floor(window.innerWidth / 2));
+  const fallbackY = Math.max(0, Math.floor(window.innerHeight / 2));
+
+  const clientX = Number.isFinite(lastPointer.clientX) ? lastPointer.clientX : fallbackX;
+  const clientY = Number.isFinite(lastPointer.clientY) ? lastPointer.clientY : fallbackY;
+  const screenX = Number.isFinite(lastPointer.screenX) ? lastPointer.screenX : 0;
+  const screenY = Number.isFinite(lastPointer.screenY) ? lastPointer.screenY : 0;
+
+  return { clientX, clientY, screenX, screenY };
+}
+
 function ensureIndicator() {
   if (indicatorRoot || !enabled || !document.documentElement) {
     return;
@@ -126,7 +138,7 @@ function dispatchMinimalMousemove() {
 
   // Dispatch only two tiny synthetic events. No loops, no DOM writes, no layout
   // reads beyond the cached pointer position, which keeps the jiggler cheap.
-  const base = lastPointer;
+  const base = getSafePointer();
   const delta = jiggleDirection;
   const targets = [document, window];
 
