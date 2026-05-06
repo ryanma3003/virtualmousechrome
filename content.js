@@ -2,11 +2,12 @@ const MIN_INTERVAL_MS = 3_000;
 const MIN_ALARM_INTERVAL_MS = 30_000;
 const USER_ACTIVITY_PAUSE_MS = 10_000;
 const INDICATOR_RESET_MS = 180;
+const VISUAL_DELTA_PX = 12;
 
 let enabled = false;
 let intervalMs = 30_000;
 let timeoutId = null;
-let lastUserActivityAt = Date.now();
+let lastUserActivityAt = 0;
 let lastPointer = {
   clientX: Math.floor(window.innerWidth / 2),
   clientY: Math.floor(window.innerHeight / 2),
@@ -15,6 +16,7 @@ let lastPointer = {
 };
 let jiggleDirection = 1;
 let indicatorRoot = null;
+let indicatorImage = null;
 let indicatorResetTimeoutId = null;
 
 function recordActivity(event) {
@@ -55,34 +57,28 @@ function ensureIndicator() {
   indicatorRoot.setAttribute("data-jiggler-indicator", "true");
   indicatorRoot.style.cssText = [
     "position:fixed",
-    "top:12px",
-    "right:12px",
+    "left:50%",
+    "top:50%",
     "z-index:2147483647",
-    "display:flex",
-    "align-items:center",
-    "gap:6px",
-    "padding:4px 6px",
-    "border-radius:999px",
-    "background:rgba(18,28,43,0.72)",
-    "color:#fff",
-    "font:600 11px/1.2 system-ui,sans-serif",
+    "display:block",
     "pointer-events:none",
+    "transform:translate3d(-50%,-50%,0)"
+  ].join(";");
+
+  indicatorImage = document.createElement("img");
+  indicatorImage.src = chrome.runtime.getURL("assets/respect.webp");
+  indicatorImage.alt = "Virtual cursor";
+  indicatorImage.style.cssText = [
+    "width:100px",
+    "height:100px",
+    "display:block",
+    "object-fit:contain",
+    "user-select:none",
+    "-webkit-user-drag:none",
     "transform:translate3d(0,0,0)"
   ].join(";");
 
-  const dot = document.createElement("span");
-  dot.style.cssText = [
-    "width:8px",
-    "height:8px",
-    "border-radius:50%",
-    "background:#71f0ab",
-    "box-shadow:0 0 0 1px rgba(255,255,255,0.18)"
-  ].join(";");
-
-  const label = document.createElement("span");
-  label.textContent = "Jiggling...";
-
-  indicatorRoot.append(dot, label);
+  indicatorRoot.append(indicatorImage);
   document.documentElement.appendChild(indicatorRoot);
 }
 
@@ -94,6 +90,7 @@ function removeIndicator() {
 
   indicatorRoot?.remove();
   indicatorRoot = null;
+  indicatorImage = null;
 }
 
 function syncIndicator() {
@@ -115,7 +112,11 @@ function moveIndicator() {
     return;
   }
 
-  indicatorRoot.style.transform = `translate3d(${jiggleDirection}px,0,0)`;
+  const base = getSafePointer();
+  indicatorRoot.style.left = `${Math.max(0, Math.round(base.clientX))}px`;
+  indicatorRoot.style.top = `${Math.max(0, Math.round(base.clientY))}px`;
+  indicatorRoot.style.transform = `translate3d(-50%,-50%,0)`;
+  indicatorImage.style.transform = `translate3d(${jiggleDirection * VISUAL_DELTA_PX}px,0,0)`;
 
   if (indicatorResetTimeoutId !== null) {
     clearTimeout(indicatorResetTimeoutId);
@@ -126,7 +127,7 @@ function moveIndicator() {
       return;
     }
 
-    indicatorRoot.style.transform = "translate3d(0,0,0)";
+    indicatorImage.style.transform = "translate3d(0,0,0)";
     indicatorResetTimeoutId = null;
   }, INDICATOR_RESET_MS);
 }
@@ -141,6 +142,8 @@ function dispatchMinimalMousemove() {
   const base = getSafePointer();
   const delta = jiggleDirection;
   const targets = [document, window];
+  const nextX = base.clientX + delta;
+  const nextY = base.clientY;
 
   for (const target of targets) {
     target.dispatchEvent(
@@ -148,8 +151,8 @@ function dispatchMinimalMousemove() {
         bubbles: true,
         cancelable: false,
         view: window,
-        clientX: base.clientX + delta,
-        clientY: base.clientY,
+        clientX: nextX,
+        clientY: nextY,
         screenX: base.screenX + delta,
         screenY: base.screenY
       })
@@ -167,6 +170,10 @@ function dispatchMinimalMousemove() {
       })
     );
   }
+
+  console.info("System activity simulated to prevent sleep");
+  console.info(`Virtual cursor moved to: ${nextX} ${nextY}`);
+  console.info("Mouse moved to:", { x: nextX, y: nextY });
 
   moveIndicator();
   jiggleDirection *= -1;
@@ -202,8 +209,13 @@ function syncLocalScheduler() {
 }
 
 function applySettings(nextEnabled, nextIntervalMs) {
+  const wasEnabled = enabled;
   enabled = Boolean(nextEnabled);
   intervalMs = Math.max(MIN_INTERVAL_MS, Number(nextIntervalMs) || MIN_ALARM_INTERVAL_MS);
+  if (enabled && !wasEnabled) {
+    // Allow the first scheduled jiggle to run on time after Start is pressed.
+    lastUserActivityAt = 0;
+  }
   syncIndicator();
   syncLocalScheduler();
 }
