@@ -17,7 +17,7 @@ async function saveSettings(nextSettings) {
 }
 
 function clampInterval(intervalMs) {
-  return Math.max(5_000, Math.min(300_000, Number(intervalMs) || DEFAULT_SETTINGS.intervalMs));
+  return Math.max(3_000, Math.min(300_000, Number(intervalMs) || DEFAULT_SETTINGS.intervalMs));
 }
 
 async function syncKeepAwake(enabled) {
