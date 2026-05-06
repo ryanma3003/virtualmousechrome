@@ -1,6 +1,7 @@
 const MIN_INTERVAL_MS = 5_000;
 const MIN_ALARM_INTERVAL_MS = 30_000;
 const USER_ACTIVITY_PAUSE_MS = 10_000;
+const INDICATOR_RESET_MS = 180;
 
 let enabled = false;
 let intervalMs = 30_000;
@@ -13,6 +14,8 @@ let lastPointer = {
   screenY: 0
 };
 let jiggleDirection = 1;
+let indicatorRoot = null;
+let indicatorResetTimeoutId = null;
 
 function recordActivity(event) {
   lastUserActivityAt = Date.now();
@@ -29,6 +32,91 @@ function recordActivity(event) {
 
 function shouldPauseForUserActivity() {
   return Date.now() - lastUserActivityAt < USER_ACTIVITY_PAUSE_MS;
+}
+
+function ensureIndicator() {
+  if (indicatorRoot || !enabled || !document.documentElement) {
+    return;
+  }
+
+  indicatorRoot = document.createElement("div");
+  indicatorRoot.setAttribute("data-jiggler-indicator", "true");
+  indicatorRoot.style.cssText = [
+    "position:fixed",
+    "top:12px",
+    "right:12px",
+    "z-index:2147483647",
+    "display:flex",
+    "align-items:center",
+    "gap:6px",
+    "padding:4px 6px",
+    "border-radius:999px",
+    "background:rgba(18,28,43,0.72)",
+    "color:#fff",
+    "font:600 11px/1.2 system-ui,sans-serif",
+    "pointer-events:none",
+    "transform:translate3d(0,0,0)"
+  ].join(";");
+
+  const dot = document.createElement("span");
+  dot.style.cssText = [
+    "width:8px",
+    "height:8px",
+    "border-radius:50%",
+    "background:#71f0ab",
+    "box-shadow:0 0 0 1px rgba(255,255,255,0.18)"
+  ].join(";");
+
+  const label = document.createElement("span");
+  label.textContent = "Jiggling...";
+
+  indicatorRoot.append(dot, label);
+  document.documentElement.appendChild(indicatorRoot);
+}
+
+function removeIndicator() {
+  if (indicatorResetTimeoutId !== null) {
+    clearTimeout(indicatorResetTimeoutId);
+    indicatorResetTimeoutId = null;
+  }
+
+  indicatorRoot?.remove();
+  indicatorRoot = null;
+}
+
+function syncIndicator() {
+  if (enabled) {
+    ensureIndicator();
+    return;
+  }
+
+  removeIndicator();
+}
+
+function moveIndicator() {
+  if (!enabled) {
+    return;
+  }
+
+  ensureIndicator();
+  if (!indicatorRoot) {
+    return;
+  }
+
+  indicatorRoot.style.transform = `translate3d(${jiggleDirection}px,0,0)`;
+
+  if (indicatorResetTimeoutId !== null) {
+    clearTimeout(indicatorResetTimeoutId);
+  }
+
+  indicatorResetTimeoutId = window.setTimeout(() => {
+    if (!indicatorRoot) {
+      return;
+    }
+
+    indicatorRoot.style.transform = "translate3d(0,0,0)";
+    indicatorResetTimeoutId = null;
+  }, INDICATOR_RESET_MS);
 }
 
 function dispatchMinimalMousemove() {
@@ -68,6 +156,7 @@ function dispatchMinimalMousemove() {
     );
   }
 
+  moveIndicator();
   jiggleDirection *= -1;
 }
 
@@ -103,6 +192,7 @@ function syncLocalScheduler() {
 function applySettings(nextEnabled, nextIntervalMs) {
   enabled = Boolean(nextEnabled);
   intervalMs = Math.max(MIN_INTERVAL_MS, Number(nextIntervalMs) || MIN_ALARM_INTERVAL_MS);
+  syncIndicator();
   syncLocalScheduler();
 }
 
